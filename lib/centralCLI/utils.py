@@ -15,11 +15,15 @@ import socket
 from io import StringIO
 from halo import Halo
 from tabulate import tabulate
+from pygments import highlight, lexers, formatters
 
 try:
     loc_user = os.getlogin()
 except Exception:
     loc_user = os.getenv("SUDO_USER", os.getenv("USER"))
+
+# removed from output and placed at top (provided with each item returned)
+CUST_KEYS = ["customer_id", "customer_name"]
 
 
 class Convert:
@@ -309,7 +313,8 @@ class Utils:
             data = yaml.load(input_file, Loader=yaml.FullLoader)
         return data
 
-    def get_host_short(self, host):
+    @staticmethod
+    def get_host_short(host):
         """Extract hostname from fqdn
 
         Arguments:
@@ -324,21 +329,46 @@ class Utils:
             else host
         )
 
-    def spinner(self, spin_txt, function, *args, **kwargs):
+    @staticmethod
+    def spinner(spin_txt, function, *args, **kwargs):
         spinner = kwargs.get("spinner", "dots")
         if sys.stdin.isatty():
             with Halo(text=spin_txt, spinner=spinner):
                 return function(*args, **kwargs)
 
     def output(self, outdata, tablefmt):
-        # pprint(outdata, indent=4)
+        # log.debugv(f"data passed to output():\n{pprint(outdata, indent=4)}")
         if tablefmt == "json":
-            from pygments import highlight, lexers, formatters
+            # from pygments import highlight, lexers, formatters
             json_data = json.dumps(outdata, sort_keys=True, indent=2)
-            table_data = highlight(bytes(json_data, 'UTF-8'), lexers.JsonLexer(), formatters.Terminal256Formatter(style='solarized-dark'))
-        elif tablefmt:
+            table_data = highlight(bytes(json_data, 'UTF-8'),
+                                   lexers.JsonLexer(),
+                                   formatters.Terminal256Formatter(style='solarized-dark')
+                                   )
+        elif tablefmt == "csv":
+            table_data = "\n".join(
+                            [
+                                ",".join(
+                                    [
+                                        k if outdata.index(d) == 0 else str(v)
+                                        for k, v in d.items()
+                                        if k not in CUST_KEYS
+                                    ])
+                                for d in outdata
+                            ])
+        elif tablefmt in ["yml", "yaml"]:
+            table_data = highlight(bytes(yaml.dump(outdata, sort_keys=True, ), 'UTF-8'),
+                                   lexers.YamlLexer(),
+                                   formatters.Terminal256Formatter(style='solarized-dark')
+                                   )
+        else:
+            customer_id = customer_name = ""
+            outdata = self.listify(outdata)
+            if outdata and isinstance(outdata, list) and isinstance(outdata[0], dict):
+                customer_id = outdata[0].get("customer_id", "")
+                customer_name = outdata[0].get("customer_name", "")
+            outdata = [{k: v for k, v in d.items() if k not in CUST_KEYS} for d in outdata]
             table_data = tabulate(outdata, headers="keys", tablefmt=tablefmt)
-        if tablefmt == "csv":
-        #TODO Add CSV output
-             pass
+            table_data = f"--\n{'Customer ID:':15}{customer_id}\n{'Customer Name:':15} {customer_name}\n--\n{table_data}"
+
         return table_data
